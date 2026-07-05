@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime, date, time
 from typing import Optional, Dict, Any, Tuple, Sequence
 import csv
+import re
 import uuid
 
 
@@ -37,6 +38,26 @@ BOOKING_COLUMNS = [
     "booking_status",
     "notes",
 ]
+
+WEEKDAY_ALIASES = {
+    "monday": 0,
+    "mon": 0,
+    "tuesday": 1,
+    "tue": 1,
+    "tues": 1,
+    "wednesday": 2,
+    "wed": 2,
+    "thursday": 3,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "friday": 4,
+    "fri": 4,
+    "saturday": 5,
+    "sat": 5,
+    "sunday": 6,
+    "sun": 6,
+}
 
 
 def ensure_csv_exists(path: Path, columns: list) -> None:
@@ -90,6 +111,80 @@ def parse_booking_time(booking_time: str) -> time:
             continue
 
     raise ValueError("Invalid time format. Use HH:MM, like 15:00, or 3 PM.")
+
+
+def extract_booking_slot(
+    message: str,
+    reference_date: Optional[date] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract an ISO date and 24-hour time from natural booking text."""
+
+    text = str(message or "").lower().strip()
+    today = reference_date or date.today()
+    booking_date = None
+    booking_time = None
+
+    iso_date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
+    if iso_date_match:
+        candidate = iso_date_match.group(1)
+        try:
+            parse_booking_date(candidate)
+            booking_date = candidate
+        except ValueError:
+            booking_date = None
+    elif re.search(r"\btoday\b", text):
+        booking_date = today.isoformat()
+    elif re.search(r"\btomorrow\b", text):
+        booking_date = date.fromordinal(today.toordinal() + 1).isoformat()
+    else:
+        weekday_pattern = "|".join(
+            sorted(WEEKDAY_ALIASES, key=len, reverse=True)
+        )
+        weekday_match = re.search(
+            rf"\b({weekday_pattern})\b",
+            text,
+        )
+        if weekday_match:
+            requested_weekday = WEEKDAY_ALIASES[weekday_match.group(1)]
+            days_ahead = (requested_weekday - today.weekday()) % 7
+            if (
+                days_ahead == 0
+                and re.search(
+                    rf"\bnext\s+{re.escape(weekday_match.group(1))}\b",
+                    text,
+                )
+            ):
+                days_ahead = 7
+            booking_date = date.fromordinal(
+                today.toordinal() + days_ahead
+            ).isoformat()
+
+    twelve_hour_match = re.search(
+        r"\b(1[0-2]|0?[1-9])"
+        r"(?::([0-5]\d))?\s*([ap])\.?m\.?\b",
+        text,
+    )
+    if twelve_hour_match:
+        hour = int(twelve_hour_match.group(1))
+        minute = int(twelve_hour_match.group(2) or 0)
+        meridiem = twelve_hour_match.group(3)
+        if meridiem == "a" and hour == 12:
+            hour = 0
+        elif meridiem == "p" and hour != 12:
+            hour += 12
+        booking_time = f"{hour:02d}:{minute:02d}"
+    else:
+        twenty_four_hour_match = re.search(
+            r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
+            text,
+        )
+        if twenty_four_hour_match:
+            booking_time = (
+                f"{int(twenty_four_hour_match.group(1)):02d}:"
+                f"{int(twenty_four_hour_match.group(2)):02d}"
+            )
+
+    return booking_date, booking_time
 
 
 def validate_booking_slot(booking_date: str, booking_time: str) -> Tuple[bool, str]:

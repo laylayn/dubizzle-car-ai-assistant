@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from services.data_loader import load_cars
 from services.retrieval import search_cars
 from services.listing_attributes import (
+    COLOR_TERMS,
     PRICE_FIELD_NAMES,
     extract_color_from_car,
     extract_mileage_from_car,
@@ -21,7 +22,6 @@ from services.listing_attributes import (
 from services.query_planner import build_query_plan
 from services.guardrails import apply_guardrails, log_intent
 from services.llm_agent import (
-    COLOR_TERMS,
     extract_user_request,
     is_memory_recall_request,
     generate_grounded_reply,
@@ -39,6 +39,7 @@ from services.session_memory import (
     resolve_car_reference,
     is_follow_up_about_selected_car,
     update_preferences,
+    get_preferences,
     get_last_results,
 )
 from services.memory import (
@@ -50,10 +51,11 @@ from services.memory import (
     add_liked_car,
     is_meaningful_memory_query,
     format_memory_summary_for_user,
+    get_recent_user_interactions,
     record_user_interaction,
     update_memory_summary,
 )
-from services.booking import book_viewing, save_lead
+from services.booking import book_viewing, extract_booking_slot, save_lead
 
 
 app = FastAPI(
@@ -987,6 +989,48 @@ def search_from_user_memory(
     return [], "", "", False
 
 
+def resolve_car_from_long_term_memory(username: str) -> Optional[Dict[str, Any]]:
+    """Resolve the most recently discussed concrete listing for a user."""
+
+    user = get_user(username) or {}
+    last_seen_car = re.sub(
+        r"\s+",
+        " ",
+        str(user.get("last_seen_car") or "").lower(),
+    ).strip()
+    if last_seen_car:
+        for _, row in load_cars().iterrows():
+            car = row_to_car(row)
+            remembered_title = re.sub(
+                r"\s+",
+                " ",
+                build_car_title(car).lower(),
+            ).strip()
+            if remembered_title == last_seen_car:
+                return car
+
+    interactions = get_recent_user_interactions(username, limit=20)
+    for interaction in reversed(interactions):
+        listing_id = interaction.get("listing_id")
+        if listing_id is None or str(listing_id).strip() == "":
+            continue
+        try:
+            car = get_car_by_listing_id(int(listing_id))
+        except (TypeError, ValueError):
+            car = None
+        if car:
+            return car
+
+    for listing_id in reversed(user.get("liked_cars") or []):
+        try:
+            car = get_car_by_listing_id(int(listing_id))
+        except (TypeError, ValueError):
+            car = None
+        if car:
+            return car
+    return None
+
+
 def format_filter_value(value: Any) -> str:
     """Format an extracted filter for a user-facing no-results message."""
 
@@ -1156,6 +1200,50 @@ def respond_about_selected_car(
     )
 
 
+def persist_confirmed_booking_memory(
+    username: str,
+    car: Dict[str, Any],
+    booking_date: str,
+    booking_time: str,
+    budget: str = "",
+    needs: str = "",
+    preferred_make: str = "",
+    preferred_model: str = "",
+) -> None:
+    """Apply the same long-term memory updates for UI and chat bookings."""
+
+    selected_car_title = build_car_title(car)
+    update_user_memory(
+        username=username,
+        last_budget=budget,
+        preferred_make=preferred_make or str(car.get("make") or ""),
+        preferred_model=preferred_model or str(car.get("model") or ""),
+        last_seen_car=selected_car_title,
+        last_query=f"Booked viewing for {selected_car_title}",
+    )
+    add_liked_car(
+        username,
+        int(car.get("listing_id")),
+        make=str(car.get("make") or ""),
+        model=str(car.get("model") or ""),
+        car_title=selected_car_title,
+        refresh_summary=False,
+    )
+    record_user_interaction(
+        username=username,
+        event_type="booking",
+        query=f"Booked viewing for {selected_car_title}",
+        make=str(car.get("make") or ""),
+        model=str(car.get("model") or ""),
+        budget=budget,
+        listing_id=int(car.get("listing_id")),
+        car_title=selected_car_title,
+        lead_quality="Hot",
+        notes=f"Viewing booked for {booking_date} at {booking_time}. {needs}".strip(),
+    )
+    update_memory_summary(username)
+
+
 # -----------------------------
 # Endpoints
 # -----------------------------
@@ -1252,6 +1340,12 @@ def chat(request: ChatRequest):
 
     get_or_create_user(username=username)
     add_message(session_id, "user", user_message)
+    session_preferences = get_preferences(session_id)
+    booking_date_hint, booking_time_hint = extract_booking_slot(user_message)
+    booking_followup = bool(
+        session_preferences.get("pending_booking")
+        and (booking_date_hint or booking_time_hint)
+    )
 
     # Layer 1: rule-based guardrails
     guardrail = apply_guardrails(user_message)
@@ -1297,7 +1391,11 @@ def chat(request: ChatRequest):
         memory_recall_requested
         and guardrail["intent"] == "blocked_non_automotive"
     )
-    if not guardrail["allowed"] and not memory_scope_override:
+    if (
+        not guardrail["allowed"]
+        and not memory_scope_override
+        and not booking_followup
+    ):
         reply = generate_refusal_reply(
             user_message=user_message,
             blocked_intent=guardrail["intent"],
@@ -1317,7 +1415,16 @@ def chat(request: ChatRequest):
     extracted_request = extract_user_request(user_message)
     intent = extracted_request.get("intent", guardrail["intent"])
 
-    if memory_recall_requested:
+    if (
+        booking_followup
+        or (
+            memory_recall_requested
+            and guardrail["intent"] == "booking"
+        )
+    ):
+        intent = "booking"
+        extracted_request["intent"] = intent
+    elif memory_recall_requested:
         intent = "returning_user_memory"
         extracted_request["intent"] = intent
     elif is_comparison_request:
@@ -1532,6 +1639,9 @@ def chat(request: ChatRequest):
             "budget": extracted_request.get("budget"),
             "needs": extracted_request.get("needs"),
             "query_plan": query_plan,
+            "pending_booking": False,
+            "pending_booking_date": None,
+            "pending_booking_time": None,
         }
 
         update_preferences(session_id, session_preferences)
@@ -1927,8 +2037,8 @@ def chat(request: ChatRequest):
             memory_update=memory_summary,
         )
 
-    # Booking intent inside chat gives guidance.
-    # Official booking is handled by /book-viewing.
+    # Booking intent inside chat collects missing slot details or confirms
+    # through the same booking service used by /book-viewing.
     if intent == "booking":
         selected_car = get_car_from_message(user_message)
 
@@ -1936,34 +2046,147 @@ def chat(request: ChatRequest):
             save_selected_car(session_id, selected_car)
         else:
             selected_car = get_selected_car(session_id)
+        if selected_car is None and memory_recall_requested:
+            selected_car = resolve_car_from_long_term_memory(username)
+            if selected_car:
+                save_selected_car(session_id, selected_car)
 
-        booking_lead = save_lead(
-            username=username,
-            needs=user_message,
-            selected_listing_id=(
-                selected_car.get("listing_id") if selected_car else None
-            ),
-            selected_car_title=(
-                build_car_title(selected_car) if selected_car else ""
-            ),
-            notes="Lead captured from a booking request.",
-            source_intent="booking",
+        current_preferences = get_preferences(session_id)
+        booking_date = (
+            booking_date_hint
+            or current_preferences.get("pending_booking_date")
+        )
+        booking_time = (
+            booking_time_hint
+            or current_preferences.get("pending_booking_time")
+        )
+        update_preferences(
+            session_id,
+            {
+                "pending_booking": bool(selected_car),
+                "pending_booking_date": booking_date,
+                "pending_booking_time": booking_time,
+            },
         )
 
-        if selected_car:
+        booking_result = None
+        booking_lead = None
+        if selected_car and booking_date and booking_time:
+            booking_result = book_viewing(
+                username=username,
+                selected_listing_id=int(selected_car.get("listing_id")),
+                selected_car_title=build_car_title(selected_car),
+                booking_date=booking_date,
+                booking_time=booking_time,
+                budget=str(current_preferences.get("budget") or ""),
+                needs=str(current_preferences.get("needs") or user_message),
+                preferred_make=str(
+                    current_preferences.get("make")
+                    or selected_car.get("make")
+                    or ""
+                ),
+                preferred_model=str(
+                    current_preferences.get("model")
+                    or selected_car.get("model")
+                    or ""
+                ),
+                notes="Booking confirmed through chat.",
+            )
+            booking_lead = booking_result.get("lead")
+
+        if booking_result and booking_result["success"]:
+            update_preferences(
+                session_id,
+                {
+                    "pending_booking": False,
+                    "pending_booking_date": None,
+                    "pending_booking_time": None,
+                },
+            )
+            persist_confirmed_booking_memory(
+                username=username,
+                car=selected_car,
+                booking_date=booking_date,
+                booking_time=booking_time,
+                budget=str(current_preferences.get("budget") or ""),
+                needs=str(current_preferences.get("needs") or user_message),
+                preferred_make=str(current_preferences.get("make") or ""),
+                preferred_model=str(current_preferences.get("model") or ""),
+            )
             fallback_reply = (
-                f"I can help book a viewing for {build_car_title(selected_car)}. "
-                "Viewing slots are available Monday to Saturday, from 8 AM to 8 PM. "
-                "Please provide a date and time, or use the booking form."
+                f"Your viewing for {build_car_title(selected_car)} is confirmed "
+                f"for {booking_date} at {booking_time}."
             )
             reply = generate_grounded_reply(
                 user_message=user_message,
                 response_task=(
-                    "Acknowledge the selected car and ask for the date and time "
-                    "needed to book its viewing."
+                    "Confirm the completed viewing booking naturally. Preserve "
+                    "the exact car, date, and time."
                 ),
                 grounded_context={
                     "selected_car": selected_car,
+                    "booking": booking_result.get("booking"),
+                    "verified_confirmation": fallback_reply,
+                },
+                fallback_reply=fallback_reply,
+            )
+        elif booking_result:
+            if not current_preferences.get("pending_booking"):
+                booking_lead = save_lead(
+                    username=username,
+                    needs=user_message,
+                    selected_listing_id=selected_car.get("listing_id"),
+                    selected_car_title=build_car_title(selected_car),
+                    notes="Lead captured from an invalid booking request.",
+                    source_intent="booking",
+                )
+            fallback_reply = booking_result["message"]
+            reply = generate_grounded_reply(
+                user_message=user_message,
+                response_task=(
+                    "Explain why this requested viewing slot is invalid and ask "
+                    "for a valid Monday-to-Saturday time from 8 AM to 8 PM."
+                ),
+                grounded_context={
+                    "selected_car": selected_car,
+                    "requested_date": booking_date,
+                    "requested_time": booking_time,
+                    "validation_message": fallback_reply,
+                },
+                fallback_reply=fallback_reply,
+            )
+        elif selected_car:
+            if not current_preferences.get("pending_booking"):
+                booking_lead = save_lead(
+                    username=username,
+                    needs=user_message,
+                    selected_listing_id=selected_car.get("listing_id"),
+                    selected_car_title=build_car_title(selected_car),
+                    notes="Lead captured from a booking request.",
+                    source_intent="booking",
+                )
+            missing_details = []
+            if not booking_date:
+                missing_details.append("day or date")
+            if not booking_time:
+                missing_details.append("time")
+            missing_text = " and ".join(missing_details)
+            fallback_reply = (
+                f"I can help book a viewing for {build_car_title(selected_car)}. "
+                "Viewing slots are available Monday to Saturday, from 8 AM to 8 PM. "
+                f"Please provide the {missing_text}."
+            )
+            reply = generate_grounded_reply(
+                user_message=user_message,
+                response_task=(
+                    "Acknowledge the selected car and ask only for the missing "
+                    "booking details."
+                ),
+                grounded_context={
+                    "selected_car": selected_car,
+                    "known_booking_date": booking_date,
+                    "known_booking_time": booking_time,
+                    "missing_details": missing_details,
                     "viewing_schedule": {
                         "days": "Monday to Saturday",
                         "hours": "8 AM to 8 PM",
@@ -1972,6 +2195,20 @@ def chat(request: ChatRequest):
                 fallback_reply=fallback_reply,
             )
         else:
+            update_preferences(
+                session_id,
+                {
+                    "pending_booking": False,
+                    "pending_booking_date": None,
+                    "pending_booking_time": None,
+                },
+            )
+            booking_lead = save_lead(
+                username=username,
+                needs=user_message,
+                notes="Booking requested without a selected car.",
+                source_intent="booking",
+            )
             fallback_reply = (
                 "I can help book a viewing, but please select a car first. "
                 "Search for cars, choose a result, then provide a date and time. "
@@ -1995,20 +2232,21 @@ def chat(request: ChatRequest):
 
         add_message(session_id, "assistant", reply)
         log_intent(username=username, intent=intent, results_count=1 if selected_car else 0)
-        record_user_interaction(
-            username=username,
-            event_type="booking_intent",
-            query=user_message,
-            make=str((selected_car or {}).get("make") or ""),
-            model=str((selected_car or {}).get("model") or ""),
-            listing_id=(selected_car or {}).get("listing_id"),
-            car_title=(
-                build_car_title(selected_car) if selected_car else ""
-            ),
-            lead_quality=(booking_lead or {}).get("lead_status", ""),
-            notes="User asked to arrange a viewing.",
-        )
-        update_memory_summary(username)
+        if not (booking_result and booking_result["success"]):
+            if not current_preferences.get("pending_booking"):
+                record_user_interaction(
+                    username=username,
+                    event_type="booking_intent",
+                    query=user_message,
+                    make=str((selected_car or {}).get("make") or ""),
+                    model=str((selected_car or {}).get("model") or ""),
+                    listing_id=(selected_car or {}).get("listing_id"),
+                    car_title=(
+                        build_car_title(selected_car) if selected_car else ""
+                    ),
+                    lead_quality=(booking_lead or {}).get("lead_status", ""),
+                    notes="User asked to arrange a viewing.",
+                )
 
         memory_summary = get_memory_summary(username)
         memory_summary["lead_saved"] = booking_lead
@@ -2094,35 +2332,15 @@ def book_viewing_endpoint(request: BookingRequest):
     )
 
     if result["success"]:
-        update_user_memory(
+        persist_confirmed_booking_memory(
             username=request.username,
-            last_budget=request.budget,
+            car=car,
+            booking_date=request.date,
+            booking_time=request.time,
+            budget=request.budget,
+            needs=request.needs,
             preferred_make=request.preferred_make,
             preferred_model=request.preferred_model,
-            last_seen_car=selected_car_title,
-            last_query=f"Booked viewing for {selected_car_title}",
         )
-
-        add_liked_car(
-            request.username,
-            request.listing_id,
-            make=str(car.get("make") or ""),
-            model=str(car.get("model") or ""),
-            car_title=selected_car_title,
-            refresh_summary=False,
-        )
-        record_user_interaction(
-            username=request.username,
-            event_type="booking",
-            query=f"Booked viewing for {selected_car_title}",
-            make=str(car.get("make") or ""),
-            model=str(car.get("model") or ""),
-            budget=request.budget,
-            listing_id=request.listing_id,
-            car_title=selected_car_title,
-            lead_quality="Hot",
-            notes=f"Viewing booked for {request.date} at {request.time}.",
-        )
-        update_memory_summary(request.username)
 
     return result

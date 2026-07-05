@@ -3,6 +3,7 @@ from typing import Dict, Any
 import re
 
 from services.data_loader import load_cars
+from services.llm_agent import MAKE_ALIASES
 
 
 ALLOWED_INTENTS = {
@@ -22,32 +23,11 @@ REFUSAL_MESSAGE = (
     "details, comparisons, and viewing bookings."
 )
 
-COMMON_CAR_MAKES = {
-    "mercedes-benz",
-    "mercedes",
-    "mercedes benz",
-    "ford",
-    "land rover",
-    "bmw",
-    "audi",
-    "toyota",
-    "honda",
-    "nissan",
-    "ferrari",
-    "porsche",
-    "lexus",
-    "hyundai",
-    "kia",
-    "jeep",
-    "chevrolet",
-}
-
-
 @lru_cache(maxsize=1)
 def get_known_car_makes() -> list[str]:
-    """Return every dataset make plus common makes that may have no listings."""
+    """Return dataset makes plus the deliberately small normalization aliases."""
 
-    makes = set(COMMON_CAR_MAKES)
+    makes = set(MAKE_ALIASES) | set(MAKE_ALIASES.values())
 
     try:
         df = load_cars()
