@@ -11,7 +11,7 @@ wheels/
 
 # Environment variables / secrets
 .env
-.env.*
+!.env.example
 
 # Local app storage
 storage/users.db
