@@ -26,8 +26,7 @@ In a second terminal, start the Streamlit interface:
 uv run streamlit run app.py
 ```
 
-The interface uses `http://127.0.0.1:8000` by default. API documentation is
-available at `http://127.0.0.1:8000/docs`.
+The interface uses `http://127.0.0.1:8000` by default. 
 
 ## Why this setup
 
