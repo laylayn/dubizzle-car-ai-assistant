@@ -15,6 +15,7 @@ wheels/
 
 # Local app storage
 storage/users.db
+storage/chroma/
 storage/sessions.json
 storage/*.db
 

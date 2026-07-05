@@ -1,6 +1,6 @@
 from pathlib import Path
 from datetime import datetime, date, time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Sequence
 import csv
 import uuid
 
@@ -12,8 +12,7 @@ BOOKINGS_CSV_PATH = Path("storage/bookings.csv")
 LEAD_COLUMNS = [
     "lead_id",
     "timestamp",
-    "user_id",
-    "name",
+    "username",
     "budget",
     "needs",
     "preferred_make",
@@ -30,8 +29,7 @@ LEAD_COLUMNS = [
 BOOKING_COLUMNS = [
     "booking_id",
     "timestamp",
-    "user_id",
-    "name",
+    "username",
     "selected_listing_id",
     "selected_car_title",
     "booking_date",
@@ -133,6 +131,7 @@ def qualify_lead(
     preferred_make: str = "",
     preferred_model: str = "",
     needs: str = "",
+    source_intent: str = "",
 ) -> str:
     """
     Classify the lead as Cold, Warm, or Hot.
@@ -159,15 +158,68 @@ def qualify_lead(
     if has_selected_car and has_booking:
         return "Hot"
 
+    if source_intent in {"booking", "compare_listings"}:
+        return "Warm"
+
     if has_budget or has_preferences:
         return "Warm"
 
     return "Cold"
 
 
+def should_create_lead(
+    source_intent: str = "",
+    is_follow_up: bool = False,
+    budget: str = "",
+    preferred_make: str = "",
+    preferred_model: str = "",
+    desired_features: Optional[Sequence[str]] = None,
+    needs: str = "",
+) -> bool:
+    """Decide whether an interaction represents new commercial intent."""
+
+    normalized_intent = source_intent.strip().lower()
+
+    if is_follow_up or normalized_intent == "car_details":
+        return False
+
+    if normalized_intent in {"booking", "compare_listings"}:
+        return True
+
+    # Keep direct/manual save_lead calls backward compatible.
+    if not normalized_intent:
+        return True
+
+    if normalized_intent not in {
+        "car_search",
+        "lead_capture",
+        "general_car_advice",
+    }:
+        return False
+
+    has_budget = bool(budget.strip())
+    has_vehicle_preference = bool(
+        preferred_make.strip() or preferred_model.strip()
+    )
+    has_desired_feature = any(
+        str(feature).strip()
+        for feature in (desired_features or [])
+        if feature
+    )
+    has_explicit_buying_intent = (
+        normalized_intent == "lead_capture" and bool(needs.strip())
+    )
+
+    return bool(
+        has_budget
+        or has_vehicle_preference
+        or has_desired_feature
+        or has_explicit_buying_intent
+    )
+
+
 def save_lead(
-    user_id: str,
-    name: str = "",
+    username: str,
     budget: str = "",
     needs: str = "",
     preferred_make: str = "",
@@ -177,12 +229,26 @@ def save_lead(
     booking_date: str = "",
     booking_time: str = "",
     notes: str = "",
-) -> Dict[str, Any]:
+    source_intent: str = "",
+    desired_features: Optional[Sequence[str]] = None,
+    is_follow_up: bool = False,
+) -> Optional[Dict[str, Any]]:
     """
     Save a lead to leads.csv.
 
     This can be used even if the user has not booked yet.
     """
+
+    if not should_create_lead(
+        source_intent=source_intent,
+        is_follow_up=is_follow_up,
+        budget=budget,
+        preferred_make=preferred_make,
+        preferred_model=preferred_model,
+        desired_features=desired_features,
+        needs=needs,
+    ):
+        return None
 
     ensure_storage_files_exist()
 
@@ -194,13 +260,13 @@ def save_lead(
         preferred_make=preferred_make,
         preferred_model=preferred_model,
         needs=needs,
+        source_intent=source_intent,
     )
 
     lead = {
         "lead_id": str(uuid.uuid4()),
         "timestamp": datetime.utcnow().isoformat(),
-        "user_id": user_id,
-        "name": name,
+        "username": username,
         "budget": budget,
         "needs": needs,
         "preferred_make": preferred_make,
@@ -221,8 +287,7 @@ def save_lead(
 
 
 def save_booking(
-    user_id: str,
-    name: str,
+    username: str,
     selected_listing_id: int,
     selected_car_title: str,
     booking_date: str,
@@ -238,8 +303,7 @@ def save_booking(
     booking = {
         "booking_id": str(uuid.uuid4()),
         "timestamp": datetime.utcnow().isoformat(),
-        "user_id": user_id,
-        "name": name,
+        "username": username,
         "selected_listing_id": selected_listing_id,
         "selected_car_title": selected_car_title,
         "booking_date": booking_date,
@@ -256,8 +320,7 @@ def save_booking(
 
 
 def book_viewing(
-    user_id: str,
-    name: str,
+    username: str,
     selected_listing_id: int,
     selected_car_title: str,
     booking_date: str,
@@ -287,8 +350,7 @@ def book_viewing(
         }
 
     booking = save_booking(
-        user_id=user_id,
-        name=name,
+        username=username,
         selected_listing_id=selected_listing_id,
         selected_car_title=selected_car_title,
         booking_date=booking_date,
@@ -297,8 +359,7 @@ def book_viewing(
     )
 
     lead = save_lead(
-        user_id=user_id,
-        name=name,
+        username=username,
         budget=budget,
         needs=needs,
         preferred_make=preferred_make,
@@ -308,6 +369,8 @@ def book_viewing(
         booking_date=booking_date,
         booking_time=booking_time,
         notes="Converted to Hot lead after confirmed booking.",
+        source_intent="booking",
+        desired_features=[needs] if needs else [],
     )
 
     return {
@@ -321,16 +384,14 @@ def book_viewing(
 if __name__ == "__main__":
     print("\nTEST 1: Cold lead → browsing only")
     cold_lead = save_lead(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         notes="User is browsing cars only."
     )
     print(cold_lead)
 
     print("\nTEST 2: Warm lead → has budget/preferences but no booking")
     warm_lead = save_lead(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         budget="AED 120,000",
         needs="Mercedes with warranty",
         preferred_make="Mercedes-Benz",
@@ -341,8 +402,7 @@ if __name__ == "__main__":
 
     print("\nTEST 3: Friday at 3 PM → confirmed booking + Hot lead")
     result = book_viewing(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         selected_listing_id=2,
         selected_car_title="2019 Mercedes-Benz C-Class",
         booking_date="2026-07-10",
@@ -356,8 +416,7 @@ if __name__ == "__main__":
 
     print("\nTEST 4: Sunday at 2 PM → rejected booking")
     result = book_viewing(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         selected_listing_id=2,
         selected_car_title="2019 Mercedes-Benz C-Class",
         booking_date="2026-07-05",
@@ -368,8 +427,7 @@ if __name__ == "__main__":
 
     print("\nTEST 5: Monday at 7 AM → rejected booking")
     result = book_viewing(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         selected_listing_id=2,
         selected_car_title="2019 Mercedes-Benz C-Class",
         booking_date="2026-07-06",
@@ -380,8 +438,7 @@ if __name__ == "__main__":
 
     print("\nTEST 6: Monday at 9 PM → rejected booking")
     result = book_viewing(
-        user_id="layan123",
-        name="Layan",
+        username="layan123",
         selected_listing_id=2,
         selected_car_title="2019 Mercedes-Benz C-Class",
         booking_date="2026-07-06",

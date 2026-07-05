@@ -1,3 +1,1 @@
-booking_id,timestamp,user_id,name,selected_listing_id,selected_car_title,booking_date,booking_time,booking_status,notes
-9b14b42f-8902-40b9-8143-7692bd75a04f,2026-07-05T14:48:44.190735,layan123,Layan,2,2019 Mercedes-Benz C-Class,2026-07-10,3 PM,Confirmed,
-aa2e5d31-f0e0-4bb4-86c3-6d86e6e4b078,2026-07-05T15:36:26.321716,layan123,Layan,4,2019 mercedes-benz e-class e 400,2026-07-10,15:00,Confirmed,User wants a test drive.
+booking_id,timestamp,username,selected_listing_id,selected_car_title,booking_date,booking_time,booking_status,notes

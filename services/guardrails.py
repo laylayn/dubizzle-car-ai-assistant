@@ -1,5 +1,8 @@
+from functools import lru_cache
 from typing import Dict, Any
 import re
+
+from services.data_loader import load_cars
 
 
 ALLOWED_INTENTS = {
@@ -15,9 +18,46 @@ ALLOWED_INTENTS = {
 
 
 REFUSAL_MESSAGE = (
-    "I’m here to help with dubizzle car listings, vehicle details, and booking viewings. "
-    "I can help you find cars by make, model, year, features, or preferences."
+    "I can’t help with that request, but I can help with car searches, listing "
+    "details, comparisons, and viewing bookings."
 )
+
+COMMON_CAR_MAKES = {
+    "mercedes-benz",
+    "mercedes",
+    "mercedes benz",
+    "ford",
+    "land rover",
+    "bmw",
+    "audi",
+    "toyota",
+    "honda",
+    "nissan",
+    "ferrari",
+    "porsche",
+    "lexus",
+    "hyundai",
+    "kia",
+    "jeep",
+    "chevrolet",
+}
+
+
+@lru_cache(maxsize=1)
+def get_known_car_makes() -> list[str]:
+    """Return every dataset make plus common makes that may have no listings."""
+
+    makes = set(COMMON_CAR_MAKES)
+
+    try:
+        df = load_cars()
+        dataset_makes = df["make"].dropna().astype(str).str.lower().str.strip()
+        makes.update(make for make in dataset_makes if make)
+    except (FileNotFoundError, KeyError):
+        pass
+
+    makes.update(make.replace("-", " ") for make in list(makes))
+    return sorted(makes, key=len, reverse=True)
 
 
 def contains_phrase(message: str, phrases: list[str]) -> bool:
@@ -36,6 +76,20 @@ def contains_word(message: str, words: list[str]) -> bool:
     return any(re.search(rf"\b{re.escape(word)}\b", message) for word in words)
 
 
+def is_greeting_message(message: str) -> bool:
+    """Recognize standalone conversational greetings, not mixed requests."""
+
+    normalized = re.sub(r"[^\w\s]", " ", message.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    greeting_patterns = [
+        r"(?:hi|hello|hey|salam)",
+        r"(?:hi|hello|hey|salam) (?:there|assistant|dubizzle)",
+        r"(?:good morning|good afternoon|good evening)",
+        r"(?:thanks|thank you)",
+    ]
+    return any(re.fullmatch(pattern, normalized) for pattern in greeting_patterns)
+
+
 def detect_intent(message: str) -> str:
     message_lower = message.lower().strip()
 
@@ -43,16 +97,7 @@ def detect_intent(message: str) -> str:
         return "blocked_non_automotive"
 
     # 1. Greetings
-    greeting_words = [
-        "hi",
-        "hello",
-        "hey",
-        "salam",
-        "thanks",
-        "thank you",
-    ]
-
-    if contains_word(message_lower, greeting_words):
+    if is_greeting_message(message_lower):
         return "greeting"
 
     # 2. Block competitor-related requests first
@@ -210,7 +255,22 @@ def detect_intent(message: str) -> str:
         "it",
     ]
 
-    if contains_phrase(message_lower, detail_phrases) or contains_word(message_lower, detail_words):
+    has_inventory_scope = bool(
+        contains_word(
+            message_lower,
+            ["cars", "listings", "inventory", "options", "vehicles"],
+        )
+        or contains_word(
+            message_lower,
+            ["show", "find", "search", "rank", "sort"],
+        )
+        or contains_word(message_lower, get_known_car_makes())
+    )
+
+    if (
+        contains_phrase(message_lower, detail_phrases)
+        or contains_word(message_lower, detail_words)
+    ) and not has_inventory_scope:
         return "car_details"
 
     # 9. Car search
@@ -232,20 +292,14 @@ def detect_intent(message: str) -> str:
         "convertible",
         "truck",
         "pickup",
-        "ford",
-        "honda",
-        "toyota",
-        "mercedes",
-        "bmw",
-        "audi",
-        "porsche",
-        "nissan",
-        "lexus",
-        "jeep",
         "tesla",
     ]
 
-    if contains_phrase(message_lower, car_search_phrases) or contains_word(message_lower, car_words):
+    if (
+        contains_phrase(message_lower, car_search_phrases)
+        or contains_word(message_lower, car_words)
+        or contains_word(message_lower, get_known_car_makes())
+    ):
         return "car_search"
 
     # 10. General car advice
@@ -288,8 +342,8 @@ def apply_guardrails(message: str) -> Dict[str, Any]:
     }
 
 
-def log_intent(user_id: str, intent: str, results_count: int = 0) -> None:
-    print(f"intent={intent} | user_id={user_id} | results={results_count}")
+def log_intent(username: str, intent: str, results_count: int = 0) -> None:
+    print(f"intent={intent} | username={username} | results={results_count}")
 
 
 if __name__ == "__main__":
@@ -307,11 +361,11 @@ if __name__ == "__main__":
         "What is the capital of France?",
     ]
 
-    user_id = "layan123"
+    username = ""
 
     for message in test_messages:
         result = apply_guardrails(message)
-        log_intent(user_id=user_id, intent=result["intent"])
+        log_intent(username=username, intent=result["intent"])
 
         print("\nUser message:")
         print(message)
