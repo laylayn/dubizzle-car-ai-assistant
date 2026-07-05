@@ -1,0 +1,35 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Local app storage
+storage/users.db
+storage/sessions.json
+storage/*.db
+
+# Lead outputs generated while testing
+storage/leads.csv
+
+# Streamlit
+.streamlit/secrets.toml
+
+# macOS
+.DS_Store
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Logs
+*.log
