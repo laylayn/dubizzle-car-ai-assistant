@@ -57,8 +57,8 @@ In a fuller version, I would add production authentication, database-backed inve
 
 ### Multi-turn inventory conversation
 
-![Multi-turn inventory conversation](screenshots/multi_turn_chat.mov)
+![Multi-turn inventory conversation](screenshots/multi_turn_chat.mp4)
 
 ### Returning-user memory
 
-![Returning-user memory](screenshots/returning_user_memory.mov)
+![Returning-user memory](screenshots/returning_user_memory.mp4)
