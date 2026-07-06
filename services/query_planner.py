@@ -1,6 +1,8 @@
 import re
 from typing import Any, Dict, Optional
 
+from services.listing_attributes import COLOR_TERMS
+
 
 SUPPORTED_SORT_ATTRIBUTES = {"mileage", "price", "year"}
 SUPPORTED_SORT_ORDERS = {"ascending", "descending"}
@@ -164,10 +166,7 @@ def build_query_plan(
         (
             feature
             for feature in features
-            if feature in {
-                "white", "black", "silver", "grey", "gray", "blue", "red",
-                "green", "beige", "brown", "gold", "orange", "yellow", "purple",
-            }
+            if feature in COLOR_TERMS
         ),
         None,
     )
@@ -190,4 +189,11 @@ def build_query_plan(
         "sort_by": sort_by,
         "sort_order": sort_order,
         "comparison": extracted.get("selected_positions"),
+        "preference_terms": list(
+            dict.fromkeys(
+                str(term).lower().strip()
+                for term in extracted.get("preference_terms") or []
+                if str(term).strip()
+            )
+        ),
     }

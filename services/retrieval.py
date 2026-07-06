@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
 from services.data_loader import load_cars
+from services.listing_attributes import OPTIONAL_LISTING_FIELDS
 
 
 def search_cars(
@@ -133,24 +134,7 @@ def search_cars(
             "match_reason": match_reason
         }
 
-        for optional_field in [
-            "price",
-            "amount",
-            "listing_price",
-            "sale_price",
-            "price_aed",
-            "asking_price",
-            "color",
-            "colour",
-            "mileage",
-            "kilometers",
-            "kilometres",
-            "km",
-            "odometer",
-            "exterior_color",
-            "exterior_colour",
-            "features",
-        ]:
+        for optional_field in OPTIONAL_LISTING_FIELDS:
             value = row.get(optional_field, "")
             if str(value).strip():
                 car[optional_field] = value
@@ -158,40 +142,3 @@ def search_cars(
         cars.append(car)
 
     return cars
-
-
-def print_results(cars: List[Dict[str, Any]]) -> None:
-    """
-     helper function to print search results nicely in terminal
-    """
-
-    if not cars:
-        print("No matching cars found.")
-        return
-
-    for index, car in enumerate(cars, start=1):
-        print(f"\nResult {index}")
-        print("-" * 40)
-        print(f"Listing ID: {car['listing_id']}")
-        print(f"Car: {car['year']} {car['make']} {car['model']} {car['trim']}")
-        print(f"Title: {car['title']}")
-        print(f"Reason: {car['match_reason']}")
-        print(f"Description: {car['description'][:250]}...")
-
-
-if __name__ == "__main__":
-    print("\nTEST 1: Search by make = ford")
-    ford_results = search_cars(make="ford")
-    print_results(ford_results)
-
-    print("\n\nTEST 2: Search by make = mercedes-benz and year = 2019")
-    mercedes_results = search_cars(make="mercedes-benz", year=2019)
-    print_results(mercedes_results)
-
-    print("\n\nTEST 3: Search by keyword = warranty")
-    warranty_results = search_cars(keyword="warranty")
-    print_results(warranty_results)
-
-    print("\n\nTEST 4: Search by keyword = gcc")
-    gcc_results = search_cars(keyword="gcc")
-    print_results(gcc_results)

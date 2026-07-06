@@ -1,7 +1,7 @@
 [project]
 name = "dubizzle-car-ai-assistant"
 version = "0.1.0"
-description = "Add your description here"
+description = "Conversational car inventory assistant with memory and viewing bookings"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

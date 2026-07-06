@@ -46,6 +46,16 @@ def add_message(session_id: str, role: str, content: str) -> None:
     })
 
 
+def get_messages(
+    session_id: str,
+    limit: Optional[int] = None,
+) -> List[Dict[str, str]]:
+    """Return recent short-term conversation messages."""
+
+    messages = get_session(session_id).get("messages", [])
+    return messages[-limit:] if limit else list(messages)
+
+
 def save_last_results(session_id: str, cars: List[Dict[str, Any]]) -> None:
     """
     Save the latest search results shown to the user.

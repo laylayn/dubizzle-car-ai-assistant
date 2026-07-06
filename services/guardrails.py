@@ -8,6 +8,7 @@ from services.llm_agent import MAKE_ALIASES
 
 ALLOWED_INTENTS = {
     "greeting",
+    "chitchat",
     "car_search",
     "car_details",
     "compare_listings",
@@ -22,6 +23,155 @@ REFUSAL_MESSAGE = (
     "I can’t help with that request, but I can help with car searches, listing "
     "details, comparisons, and viewing bookings."
 )
+
+COMPETITOR_KEYWORDS = [
+    "yallamotor",
+    "carswitch",
+    "opensooq",
+    "autotrader",
+    "facebook marketplace",
+    "sellanycar",
+    "carvana",
+    "cars24",
+    "competitor",
+    "compare dubizzle",
+]
+CODING_KEYWORDS = [
+    "write code",
+    "python code",
+    "python script",
+    "java code",
+    "javascript",
+    "html",
+    "css",
+    "debug this",
+    "sql query",
+    "build me an app",
+    "create a function",
+    "programming",
+]
+HISTORY_KEYWORDS = [
+    "world war",
+    "history of",
+    "ancient",
+    "empire",
+    "civilization",
+    "capital of",
+]
+POLITICS_KEYWORDS = [
+    "election",
+    "president",
+    "government policy",
+    "political",
+    "vote",
+    "war in",
+]
+MEDICAL_LEGAL_KEYWORDS = [
+    "medical advice",
+    "diagnose",
+    "medicine",
+    "legal advice",
+    "lawsuit",
+    "contract law",
+]
+HOMEWORK_KEYWORDS = [
+    "solve my homework",
+    "write my essay",
+    "assignment answer",
+    "do my report",
+    "math problem",
+]
+COMPARE_KEYWORDS = [
+    "compare these cars",
+    "compare the cars",
+    "compare the first",
+    "first vs second",
+    "which one is better",
+    "better option",
+    "difference between",
+]
+BOOKING_KEYWORDS = [
+    "book",
+    "booking",
+    "viewing",
+    "test drive",
+    "appointment",
+    "schedule",
+    "slot",
+    "visit",
+]
+TEST_DRIVE_PHRASES = ["test drive"]
+LEAD_KEYWORDS = [
+    "my budget",
+    "budget",
+    "i want",
+    "i need",
+    "looking for",
+    "prefer",
+    "under",
+    "range",
+    "family car",
+    "daily use",
+    "for work",
+]
+DETAIL_PHRASES = [
+    "tell me about",
+    "first one",
+    "second one",
+    "third one",
+    "that one",
+    "that car",
+    "this car",
+    "selected car",
+    "service history",
+]
+DETAIL_WORDS = [
+    "mileage",
+    "warranty",
+    "gcc",
+    "specs",
+    "accident",
+    "description",
+    "details",
+]
+INVENTORY_SCOPE_WORDS = [
+    "cars",
+    "listings",
+    "inventory",
+    "options",
+    "vehicles",
+]
+SEARCH_ACTION_WORDS = ["show", "find", "search", "rank", "sort"]
+CAR_SEARCH_PHRASES = [
+    "show me",
+    "find",
+    "search",
+    "available",
+    "listings",
+]
+CAR_WORDS = [
+    "cars",
+    "car",
+    "suv",
+    "sedan",
+    "coupe",
+    "hatchback",
+    "convertible",
+    "truck",
+    "pickup",
+    "tesla",
+]
+GENERAL_CAR_KEYWORDS = [
+    "reliable",
+    "fuel efficient",
+    "maintenance",
+    "resale value",
+    "family",
+    "off-road",
+    "luxury",
+    "sports car",
+]
+
 
 @lru_cache(maxsize=1)
 def get_known_car_makes() -> list[str]:
@@ -81,223 +231,69 @@ def detect_intent(message: str) -> str:
         return "greeting"
 
     # 2. Block competitor-related requests first
-    competitor_keywords = [
-        "yallamotor",
-        "carswitch",
-        "opensooq",
-        "autotrader",
-        "facebook marketplace",
-        "sellanycar",
-        "carvana",
-        "cars24",
-        "competitor",
-        "compare dubizzle",
-    ]
-
-    if contains_phrase(message_lower, competitor_keywords):
+    if contains_phrase(message_lower, COMPETITOR_KEYWORDS):
         return "blocked_competitor"
 
     # 3. Block coding requests before car-detail checks
-    coding_keywords = [
-        "write code",
-        "python code",
-        "python script",
-        "java code",
-        "javascript",
-        "html",
-        "css",
-        "debug this",
-        "sql query",
-        "build me an app",
-        "create a function",
-        "programming",
-    ]
-
-    if contains_phrase(message_lower, coding_keywords):
+    if contains_phrase(message_lower, CODING_KEYWORDS):
         return "blocked_coding"
 
     # 4. Block common non-automotive topics
-    history_keywords = [
-        "world war",
-        "history of",
-        "ancient",
-        "empire",
-        "civilization",
-        "capital of",
-    ]
-
-    politics_keywords = [
-        "election",
-        "president",
-        "government policy",
-        "political",
-        "vote",
-        "war in",
-    ]
-
-    medical_legal_keywords = [
-        "medical advice",
-        "diagnose",
-        "medicine",
-        "legal advice",
-        "lawsuit",
-        "contract law",
-    ]
-
-    homework_keywords = [
-        "solve my homework",
-        "write my essay",
-        "assignment answer",
-        "do my report",
-        "math problem",
-    ]
-
-    if contains_phrase(message_lower, history_keywords):
+    if contains_phrase(message_lower, HISTORY_KEYWORDS):
         return "blocked_history"
 
-    if contains_phrase(message_lower, politics_keywords):
+    if contains_phrase(message_lower, POLITICS_KEYWORDS):
         return "blocked_politics"
 
-    if contains_phrase(message_lower, medical_legal_keywords):
+    if contains_phrase(message_lower, MEDICAL_LEGAL_KEYWORDS):
         return "blocked_medical_legal"
 
-    if contains_phrase(message_lower, homework_keywords):
+    if contains_phrase(message_lower, HOMEWORK_KEYWORDS):
         return "blocked_random_homework"
 
     # 5. Compare listings before generic car search
-    compare_keywords = [
-        "compare these cars",
-        "compare the cars",
-        "compare the first",
-        "first vs second",
-        "which one is better",
-        "better option",
-        "difference between",
-    ]
-
-    if contains_phrase(message_lower, compare_keywords):
+    if contains_phrase(message_lower, COMPARE_KEYWORDS):
         return "compare_listings"
 
     # 6. Booking
-    booking_keywords = [
-        "book",
-        "booking",
-        "viewing",
-        "test drive",
-        "appointment",
-        "schedule",
-        "slot",
-        "visit",
-    ]
-
-    if contains_word(message_lower, booking_keywords) or contains_phrase(message_lower, ["test drive"]):
+    if contains_word(message_lower, BOOKING_KEYWORDS) or contains_phrase(
+        message_lower,
+        TEST_DRIVE_PHRASES,
+    ):
         return "booking"
 
     # 7. Lead capture / preferences
-    lead_keywords = [
-        "my budget",
-        "budget",
-        "i want",
-        "i need",
-        "looking for",
-        "prefer",
-        "under",
-        "range",
-        "family car",
-        "daily use",
-        "for work",
-    ]
-
-    if contains_phrase(message_lower, lead_keywords):
+    if contains_phrase(message_lower, LEAD_KEYWORDS):
         return "lead_capture"
 
     # 8. Car details / follow-up
-    detail_phrases = [
-        "tell me about",
-        "first one",
-        "second one",
-        "third one",
-        "that one",
-        "that car",
-        "this car",
-        "selected car",
-        "service history",
-    ]
-
-    detail_words = [
-        "mileage",
-        "warranty",
-        "gcc",
-        "specs",
-        "accident",
-        "description",
-        "details",
-        "it",
-    ]
-
     has_inventory_scope = bool(
-        contains_word(
-            message_lower,
-            ["cars", "listings", "inventory", "options", "vehicles"],
-        )
-        or contains_word(
-            message_lower,
-            ["show", "find", "search", "rank", "sort"],
-        )
+        contains_word(message_lower, INVENTORY_SCOPE_WORDS)
+        or contains_word(message_lower, SEARCH_ACTION_WORDS)
         or contains_word(message_lower, get_known_car_makes())
     )
 
     if (
-        contains_phrase(message_lower, detail_phrases)
-        or contains_word(message_lower, detail_words)
+        contains_phrase(message_lower, DETAIL_PHRASES)
+        or contains_word(message_lower, DETAIL_WORDS)
     ) and not has_inventory_scope:
         return "car_details"
 
     # 9. Car search
-    car_search_phrases = [
-        "show me",
-        "find",
-        "search",
-        "available",
-        "listings",
-    ]
-
-    car_words = [
-        "cars",
-        "car",
-        "suv",
-        "sedan",
-        "coupe",
-        "hatchback",
-        "convertible",
-        "truck",
-        "pickup",
-        "tesla",
-    ]
-
     if (
-        contains_phrase(message_lower, car_search_phrases)
-        or contains_word(message_lower, car_words)
+        contains_phrase(message_lower, CAR_SEARCH_PHRASES)
+        or contains_word(message_lower, CAR_WORDS)
         or contains_word(message_lower, get_known_car_makes())
     ):
         return "car_search"
 
     # 10. General car advice
-    general_car_keywords = [
-        "reliable",
-        "fuel efficient",
-        "maintenance",
-        "resale value",
-        "family",
-        "off-road",
-        "luxury",
-        "sports car",
-    ]
-
-    if contains_phrase(message_lower, general_car_keywords):
+    if contains_phrase(message_lower, GENERAL_CAR_KEYWORDS):
         return "general_car_advice"
 
-    return "blocked_non_automotive"
+    # Explicitly unsafe/out-of-scope categories were handled above. Let the
+    # conversational layer answer harmless small talk naturally.
+    return "chitchat"
 
 
 def is_allowed_intent(intent: str) -> bool:
@@ -324,37 +320,3 @@ def apply_guardrails(message: str) -> Dict[str, Any]:
 
 def log_intent(username: str, intent: str, results_count: int = 0) -> None:
     print(f"intent={intent} | username={username} | results={results_count}")
-
-
-if __name__ == "__main__":
-    test_messages = [
-        "Hi",
-        "Show me Mercedes cars",
-        "I want an SUV with warranty under AED 120,000",
-        "Tell me about the first one",
-        "Can I book a viewing on Friday?",
-        "Compare the first and second car",
-        "Write me Python code",
-        "Tell me about World War 2",
-        "Compare dubizzle with YallaMotor",
-        "Give me legal advice",
-        "What is the capital of France?",
-    ]
-
-    username = ""
-
-    for message in test_messages:
-        result = apply_guardrails(message)
-        log_intent(username=username, intent=result["intent"])
-
-        print("\nUser message:")
-        print(message)
-
-        print("Guardrail result:")
-        print(result)
-
-        if not result["allowed"]:
-            print("Assistant refusal:")
-            print(result["refusal_message"])
-
-        print("-" * 60)

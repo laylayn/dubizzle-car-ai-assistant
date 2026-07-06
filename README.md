@@ -1,6 +1,6 @@
 # dubizzle Cars AI Assistant
 
-A conversational prototype for searching a provided used-car inventory, asking
+A conversational prototype for searching a provided car inventory, asking
 follow-up questions, comparing listings, remembering returning users, qualifying
 leads, and booking viewings.
 
@@ -37,16 +37,18 @@ SDK so routing, grounding, and fallbacks remain explicit. Inventory retrieval
 combines query planning, pandas filters, listing-text matching, and reusable
 price/mileage/feature extractors. Short-term state is stored per session in
 memory, while SQLite stores returning-user preferences, meaningful interactions,
-and an AI-generated grounded summary; leads and confirmed bookings are written
-to CSV.
+and an LLM-assisted summary with deterministic fallback; leads and confirmed
+bookings are written to CSV.
 
 ## Implementation
 
-The LLM extracts intent and filters, but the backend executes searches against
-the supplied dataset and gives the model only retrieved listing facts. Session
-memory resolves references such as “the first one” or “it,” while guardrails
-decline unrelated requests. Booking rules, lead qualification, comparisons, and
-long-term memory updates are handled by dedicated backend services.
+Rule-based guardrails and deterministic extraction run first. Gemini is optional
+and helps extract intent and filters when needed, while the backend executes
+searches against the supplied dataset and gives the model only retrieved listing
+facts. Session memory resolves references such as “the first one” or “it,” while
+guardrails decline unrelated requests. Booking rules, lead qualification,
+comparisons, and long-term memory updates are handled by dedicated backend
+services.
 
 Some features were intentionally left outside the scope of this take-home prototype. I considered adding hybrid RAG retrieval to make the search more semantic, but for a small dataset, I kept the retrieval mostly structured because it made the system easier to test, debug, and trust. 
 
@@ -57,8 +59,8 @@ In a fuller version, I would add production authentication, database-backed inve
 
 ### Multi-turn inventory conversation
 
-![Multi-turn inventory conversation](screenshots/multi_turn_chat.mp4)
+[Watch the multi-turn inventory conversation](screenshots/multi_turn_chat.mp4)
 
 ### Returning-user memory
 
-![Returning-user memory](screenshots/returning_user_memory.mp4)
+[Watch the returning-user memory demo](screenshots/returning_user_memory.mp4)

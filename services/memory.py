@@ -642,39 +642,3 @@ def get_memory_summary(username: str) -> Dict[str, Any]:
         "liked_cars": user.get("liked_cars", []),
         "memory_summary": user.get("memory_summary", ""),
     }
-
-
-if __name__ == "__main__":
-    print("\nInitializing database...")
-    init_db()
-
-    print("\nSESSION 1: Creating/updating user memory")
-
-    username = ""
-
-    user = get_or_create_user(username=username)
-    print("Initial user:")
-    print(user)
-
-    updated_user = update_user_memory(
-        username=username,
-        last_budget="AED 120,000",
-        preferred_make="Mercedes-Benz",
-        preferred_model="C-Class",
-        preferred_body_type="Sedan",
-        last_seen_car="2019 Mercedes-Benz C-Class",
-        last_query="I want a Mercedes with warranty"
-    )
-
-    add_liked_car(username=username, listing_id=2)
-
-    print("\nUpdated user:")
-    print(updated_user)
-
-    print("\nSESSION 2: Simulating returning user")
-
-    returning_user = get_user(username)
-    print(build_welcome_message(returning_user))
-
-    print("\nMemory summary for Streamlit sidebar:")
-    print(get_memory_summary(username))

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -21,7 +23,8 @@ except ImportError:
 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+_LLM_COOLDOWN_UNTIL = 0.0
 
 MAKE_ALIASES = {
     "mercedes": "mercedes-benz",
@@ -72,6 +75,7 @@ def normalize_make(make: Optional[str]) -> Optional[str]:
     return MAKE_ALIASES.get(alias_key, normalized)
 
 
+@lru_cache(maxsize=1)
 def get_gemini_client():
     """
     Create a Gemini client if the API key and package are available.
@@ -122,6 +126,11 @@ def call_gemini(prompt: str) -> Optional[str]:
     This keeps the app from crashing.
     """
 
+    global _LLM_COOLDOWN_UNTIL
+
+    if time.monotonic() < _LLM_COOLDOWN_UNTIL:
+        return None
+
     client = get_gemini_client()
 
     if client is None:
@@ -133,10 +142,17 @@ def call_gemini(prompt: str) -> Optional[str]:
             contents=prompt,
         )
 
+        _LLM_COOLDOWN_UNTIL = 0.0
         return response.text
 
     except Exception as error:
         print(f"[LLM ERROR] Gemini call failed: {error}")
+        error_text = str(error).lower()
+        _LLM_COOLDOWN_UNTIL = time.monotonic() + (
+            60.0
+            if "resource_exhausted" in error_text or "quota" in error_text
+            else 10.0
+        )
         return None
 
 
@@ -342,7 +358,14 @@ def is_memory_recall_request(message: str) -> bool:
         r"similar|continue|cars?|vehicles?|asking about|asked about)\b",
         message_lower,
     )
-    return bool(past_reference and memory_subject)
+    personal_memory_question = bool(
+        re.search(r"\b(?:remember|memory|saved)\b", message_lower)
+        and re.search(r"\b(?:me|my|mine)\b", message_lower)
+    )
+    return bool(
+        (past_reference and memory_subject)
+        or personal_memory_question
+    )
 
 
 def fallback_extract_user_request(message: str) -> Dict[str, Any]:
@@ -465,7 +488,7 @@ def fallback_extract_user_request(message: str) -> Dict[str, Any]:
     elif has_attribute_question:
         intent = "car_details"
     else:
-        intent = "car_search"
+        intent = "chitchat"
 
     keyword = keywords[0] if len(keywords) == 1 else None
 
@@ -481,6 +504,7 @@ def fallback_extract_user_request(message: str) -> Dict[str, Any]:
         "body_type": body_type,
         "required_keywords": keywords,
         "soft_preferences": soft_preferences,
+        "preference_terms": [],
         "attribute_request": query_operations.get("attribute_request"),
         "sort_by": query_operations.get("sort_by"),
         "sort_order": query_operations.get("sort_order"),
@@ -576,6 +600,7 @@ Return ONLY valid JSON. No markdown. No explanation.
 
 Allowed intents:
 - greeting
+- chitchat
 - car_search
 - car_details
 - compare_listings
@@ -588,7 +613,7 @@ Allowed intents:
 
 Extract these fields:
 {{
-  "intent": "car_search | car_details | booking | lead_capture | compare_listings | greeting | returning_user_memory | general_car_advice | blocked_non_automotive | blocked_competitor",
+  "intent": "car_search | car_details | booking | lead_capture | compare_listings | greeting | chitchat | returning_user_memory | general_car_advice | blocked_non_automotive | blocked_competitor",
   "make": string or null,
   "model": string or null,
   "year": integer or null,
@@ -596,6 +621,7 @@ Extract these fields:
   "keywords": list of strings,
   "required_keywords": list of objective listing-text constraints,
   "soft_preferences": list of subjective goals,
+  "preference_terms": list of concrete listing-text concepts that could provide evidence for subjective goals,
   "body_type": string or null,
   "budget": string or null,
   "needs": string or null,
@@ -609,6 +635,7 @@ Rules:
 - Requests about saved preferences, a previous search, or "last time" use
   returning_user_memory. Do not turn their literal wording into a keyword.
 - Standalone greetings such as "hi", "hello", or "good morning" use greeting.
+- Harmless conversational messages with no inventory action use chitchat.
 - A greeting followed by a real request should use the request's intent.
 - If user asks about a make/model/year/features, intent is car_search.
 - A message containing only a car make, such as "ferrari" or "mercedes", is a car_search.
@@ -622,6 +649,13 @@ Rules:
 - Put subjective goals such as reliable, affordable, comfortable, practical,
   fuel efficient, or low maintenance in soft_preferences. Do not require these
   words to appear literally in a listing.
+- For each subjective goal, put a small set of concrete, concise concepts that
+  could reasonably appear in vehicle listing text into preference_terms.
+  These are retrieval hints, not facts. Do not include makes or models unless
+  the user explicitly requested them, and do not claim the concepts are present.
+- If soft_preferences is non-empty, preference_terms MUST contain 2 to 5
+  useful evidence concepts. Prefer wording and common variants likely to occur
+  literally in used-car titles or descriptions. Never leave it empty.
 - Extract body style separately in body_type when one is stated.
 - Translate ranking language into an attribute operation rather than a literal
   keyword. Low/least mileage means sort_by=mileage ascending; cheapest or
@@ -663,6 +697,11 @@ User message:
         or []
     )
     parsed_soft_preferences = list(parsed.get("soft_preferences") or [])
+    parsed_preference_terms = [
+        str(term).lower().strip()
+        for term in parsed.get("preference_terms") or []
+        if str(term).strip()
+    ]
 
     for keyword in fallback_request.get("keywords") or []:
         if keyword not in parsed_keywords:
@@ -703,6 +742,7 @@ User message:
         "keywords": objective_keywords,
         "required_keywords": objective_keywords,
         "soft_preferences": parsed_soft_preferences,
+        "preference_terms": list(dict.fromkeys(parsed_preference_terms)),
         "body_type": parsed.get("body_type") or fallback_request.get("body_type"),
         "budget": parsed.get("budget") or fallback_request.get("budget"),
         # The deterministic extraction keeps the complete user phrasing. This
@@ -729,7 +769,7 @@ def is_high_confidence_fallback_request(
     """Skip a separate LLM intent call when deterministic extraction is clear."""
 
     intent = extracted_request.get("intent")
-    if intent in {"greeting", "booking", "returning_user_memory"}:
+    if intent in {"greeting", "chitchat", "booking", "returning_user_memory"}:
         return True
     if extracted_request.get("selected_position") is not None:
         return True
@@ -748,39 +788,7 @@ def is_high_confidence_fallback_request(
         or extracted_request.get("sort_by")
         or extracted_request.get("attribute_request")
         or extracted_request.get("required_keywords")
-        or extracted_request.get("soft_preferences")
     )
-
-
-def format_cars_for_prompt(cars: List[Dict[str, Any]]) -> str:
-    """
-    Convert retrieved cars into compact text for the LLM.
-
-    Important:
-    Only these cars are allowed to be mentioned in the final response.
-    """
-
-    if not cars:
-        return "No matching inventory results were found."
-
-    formatted = []
-
-    for index, car in enumerate(cars, start=1):
-        formatted.append(
-            f"""
-Result {index}
-Listing ID: {car.get("listing_id", "")}
-Year: {car.get("year", "")}
-Make: {car.get("make", "")}
-Model: {car.get("model", "")}
-Trim: {car.get("trim", "")}
-Title: {car.get("title", "")}
-Description: {car.get("description", "")}
-Match reason: {car.get("match_reason", "")}
-""".strip()
-        )
-
-    return "\n\n".join(formatted)
 
 
 def generate_inventory_reply(
@@ -957,23 +965,3 @@ def generate_refusal_reply(
         },
         fallback_reply=fallback_reply,
     )
-
-
-if __name__ == "__main__":
-    test_messages = [
-        "I want a reliable SUV with warranty.",
-        "Show me Mercedes-Benz cars from 2019.",
-        "Tell me about the first one.",
-        "Can I book a viewing for Friday at 3 PM?",
-        "Write me Python code.",
-    ]
-
-    for message in test_messages:
-        print("\nUser message:")
-        print(message)
-
-        extracted = extract_user_request(message)
-
-        print("Extracted request:")
-        print(json.dumps(extracted, indent=2))
-        print("-" * 60)

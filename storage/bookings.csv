@@ -1,3 +1,0 @@
-booking_id,timestamp,username,selected_listing_id,selected_car_title,booking_date,booking_time,booking_status,notes
-7a52aab7-11ca-4f21-8eda-fe86c321857d,2026-07-05T23:14:13.532419,user_test_004,3,2018 land rover range rover velar other,2026-07-11,15:00,Confirmed,Booking confirmed through chat.
-5cff71f2-a2aa-4f29-b15e-5c7de86d7144,2026-07-05T23:47:32.162778,user_013,89,2022 mini cooper john cooper works,2026-07-06,14:00,Confirmed,Booking confirmed through chat.

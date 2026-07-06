@@ -18,6 +18,13 @@ MILEAGE_FIELD_NAMES = [
     "odometer",
 ]
 COLOR_FIELD_NAMES = ["color", "colour", "exterior_color", "exterior_colour"]
+OPTIONAL_LISTING_FIELDS = [
+    *PRICE_FIELD_NAMES,
+    *COLOR_FIELD_NAMES[:2],
+    *MILEAGE_FIELD_NAMES,
+    *COLOR_FIELD_NAMES[2:],
+    "features",
+]
 COLOR_TERMS = [
     "white",
     "black",
